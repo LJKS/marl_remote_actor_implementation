@@ -5,8 +5,8 @@ import remote_runner
 import numpy as np
 import statistics
 
-#ray.init(log_to_driver=False)
-ray.init()
+ray.init(log_to_driver=False)
+#ray.init()
 class Training_organizer:
     def __init__(self, steps, gym, network_descriptions, curriculum_designer):
         self.num_remotes = 8
