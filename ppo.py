@@ -51,28 +51,24 @@ class PPO_optimizer:
         for states, actions, sampling_action_log_probs, advantages in zip(dataset_states, dataset_actions, dataset_sampling_action_log_probs, dataset_advantages):
             with tf.GradientTape() as tape:
                 new_action_log_probs, entropy = self.actor.action_log_prob_and_entropy(states, actions)
-                print('actions', actions)
                 ppo_loss = self._ppo_and_entropy_loss(advantages, sampling_action_log_probs, new_action_log_probs, entropy)
                 gradients = tape.gradient(ppo_loss, self.actor.model.trainable_variables)
                 self.actor.model.optimizer.apply_gradients(zip(gradients, self.actor.model.trainable_variables))
 
     def _ppo_and_entropy_loss(self, advantages, sampling_action_log_probs, new_action_log_probs, entropy):
-        print('sampling_action_log_probs', sampling_action_log_probs)
-        print('new_action_log_probs', new_action_log_probs)
         ppo_objective = self._ppo_objective(advantages, sampling_action_log_probs, new_action_log_probs)
-        print('ppo_objective', ppo_objective)
         entropy_objective = self.entropy_coefficient*entropy
-        print('entropy_objective', entropy_objective)
+        #print('entropy', entropy_objective)
         ppo_and_entropy_loss = - (ppo_objective + entropy_objective)
-        print('ppo and entropy loss', ppo_and_entropy_loss)
         return ppo_and_entropy_loss
 
     def _ppo_objective(self, advantages, sampling_action_log_probs, new_action_log_probs):
-        print('advantages', advantages)
         log_probability_ratio = new_action_log_probs - sampling_action_log_probs
         probability_ratio = tf.math.exp(log_probability_ratio)
+        #print('advantages', advantages)
         clipped_probability_ratio = tf.clip_by_value(probability_ratio, 1-self.epsilon, 1+self.epsilon)
         ppo_objective = tf.math.minimum(advantages*probability_ratio, advantages*clipped_probability_ratio)
+        #print('ppoobjective', ppo_objective)
         return ppo_objective
 
 
@@ -89,7 +85,12 @@ class PPO_optimizer:
     def create_datasets(self, data):
         datasets = {}
         for key in data.keys():
+            if key == 'advantages':
+                advs = data[key]
+                advs = np.asarray(advs)
+                advs = advs - np.mean(advs)
+                advs = advs / np.std(advs)
+                advs = np.squeeze(advs)
+                data[key]=np.split(advs, advs.shape[0])
             datasets[key] = tf.data.Dataset.from_tensor_slices(data[key])
         return datasets
-
-    #From here on import of the models

@@ -23,3 +23,13 @@ class Uniform_Sampling:
     def __init__(self, fraction):
         self.results = []
         self.step = 0
+    def sample_opponent(self):
+        a = 5
+        ## TODO:
+
+    def update(self, updates):
+        a=5
+        ## TODO:
+    def report(self):
+        a=5
+        #TODO
