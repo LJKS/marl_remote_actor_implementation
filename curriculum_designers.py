@@ -14,6 +14,7 @@ class Self_play:
         #debug only
         results = [statistics.mean(step_results[0]) for step_results in self.results]
         print(results)
+        
     def report(self):
         last_step = self.results[-1]
         mean_results = [statistics.mean(idx_results) if len(idx_results)>0 else None for idx_results in last_step]

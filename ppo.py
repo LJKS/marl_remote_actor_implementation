@@ -1,96 +1,124 @@
-import models
 import ray
 import numpy as np
 import logging
+import model_factory
 import tensorflow as tf
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
-@ray.remote(num_cpus=4)
+
 class PPO_optimizer:
     '''
     @params:
      - data: dict with keys: 'value_targets', 'states', 'actions', 'sampling_action_log_probs', 'advantages'
     '''
+
     def __init__(self, network_descriptions, actor_weights, critic_weights, data):
+        self.data_keys = ['value_targets', 'states', 'actions', 'sampling_action_log_probs', 'advantages']
         self.epsilon = 0.2
-        self.buffer_size = 2000
-        self.batch_size = 32
-        self.critic_optimization_epochs = 2
-        self.actor_optimization_epochs = 5
-        self.entropy_coefficient = .01
+        self.shuffle_buffer_size = 1000
+        self.prefetch_buffer_size = 128
+        self.batch_size = 64
+        self.critic_optimization_epochs = 10
+        self.actor_optimization_epochs = 10
+        self.entropy_coefficient = 0.01
         actor_description = network_descriptions['actor']
-        self.actor = models.Actor(actor_description[0](actor_description[1], actor_description[2], actor_description[3], actor_description[4], actor_description[5]))
+        self.actor = model_factory.get_model('Actor')(model_factory.get_model(actor_description[0])(actor_description[1], actor_description[2], actor_description[3], actor_description[4], actor_description[5]))
         self.actor.set_weights(actor_weights)
         critic_description = network_descriptions['critic']
-        self.critic = critic_description[0](critic_description[1], critic_description[2], critic_description[3])
+        self.critic = model_factory.get_model(critic_description[0])(critic_description[1], critic_description[2], critic_description[3])
         self.critic.set_weights(critic_weights)
-        self.datasets = self.create_datasets(data)
+        self.dataset = self.create_datasets(data)
+        #debug
+        self.critic_loss_logger=[]
+        self.entropy_logger=[]
+        self.ppo_policy_loss_logger=[]
 
-    @ray.method(num_return_vals=2)
+
+
     def optimize(self):
         for _ in range(self.actor_optimization_epochs):
             self._optimize_actor_ppo()
         for _ in range(self.critic_optimization_epochs):
             self._optimize_critic()
-        return self.actor.model.get_weights(), self.critic.get_weights()
+        report = {'critic_history':self.critic_loss_logger, 'critic_summary': np.mean(np.asarray(self.critic_loss_logger)), 'entropy_history':[entropy for entropy in self.entropy_logger], 'entropy_summary': np.mean(np.asarray(self.entropy_logger)), 'policy_history': self.ppo_policy_loss_logger, 'policy_summary': np.mean(np.asarray(self.ppo_policy_loss_logger))}
+        #report = {'critic_history':self.critic_loss_logger, 'critic_summary': np.mean(np.asarray(self.critic_loss_logger)), 'entropy_history':[entropy/self.entropy_coefficient for entropy in self.entropy_logger], 'entropy_summary': np.mean(np.asarray(self.entropy_logger))/self.entropy_coefficient, 'policy_history': self.ppo_policy_loss_logger, 'policy_summary': np.mean(np.asarray(self.ppo_policy_loss_logger))}
+        return self.actor.model.get_weights(), self.critic.get_weights(), report
 
     def _optimize_critic(self):
-        #prepare data
-        dataset_states = self.datasets['states']
-        dataset_value_targets = self.datasets['value_targets']
-        dataset_states, dataset_value_targets = self._prepare_datasets(['states', 'value_targets'])
+        losses = []
+        for value_targets, states, _, _, _  in self.dataset:
+            loss = self._optimize_critic_step(value_targets, states)
+            losses.append(np.mean(loss.numpy()))
+        self.critic_loss_logger.append(np.mean(np.asarray(losses)))
 
-        for states, value_targets in zip(dataset_states, dataset_value_targets):
-            with tf.GradientTape() as tape:
-                predictions = self.critic(states)
-                loss = tf.keras.losses.MSE(value_targets, predictions)
-                gradients = tape.gradient(loss, self.critic.trainable_variables)
-                self.critic.optimizer.apply_gradients(zip(gradients, self.critic.trainable_variables))
+    @tf.function
+    def _optimize_critic_step(self, value_targets, states):
+
+        with tf.GradientTape() as tape:
+            predictions = self.critic(states)
+            #print('state shape', states.numpy().shape)
+            #print('pred shapes', predictions.numpy().shape)
+            #print('target_shapes', value_targets.shape)
+            loss = tf.keras.losses.MSE(value_targets, predictions)
+            loss = tf.reduce_mean(loss)
+            #print('loss shape', loss.numpy().shape)
+            gradients = tape.gradient(loss, self.critic.trainable_variables)
+            self.critic.optimizer.apply_gradients(zip(gradients, self.critic.trainable_variables))
+            return loss
 
     def _optimize_actor_ppo(self):
-        dataset_states, dataset_actions, dataset_sampling_action_log_probs, dataset_advantages = self._prepare_datasets(['states', 'actions', 'sampling_action_log_probs', 'advantages'])
-        for states, actions, sampling_action_log_probs, advantages in zip(dataset_states, dataset_actions, dataset_sampling_action_log_probs, dataset_advantages):
-            with tf.GradientTape() as tape:
-                new_action_log_probs, entropy = self.actor.action_log_prob_and_entropy(states, actions)
-                ppo_loss = self._ppo_and_entropy_loss(advantages, sampling_action_log_probs, new_action_log_probs, entropy)
-                gradients = tape.gradient(ppo_loss, self.actor.model.trainable_variables)
-                self.actor.model.optimizer.apply_gradients(zip(gradients, self.actor.model.trainable_variables))
+        entropies = []
+        policy_losses = []
+        for _, states, actions, sampling_action_log_probs, advantages in self.dataset:
+            #print('stateshape', states.shape)
+            #print('action_shape', actions.shape)
+            #print('sampling_action_log_probs_shape', sampling_action_log_probs.shape)
+            #print('adv_shape', advantages.shape)
+            policy_loss, entropy_loss = self._optimize_actor_ppo_step(states, actions, sampling_action_log_probs, advantages)
+            entropies.append(np.mean(entropy_loss.numpy()))
+            policy_losses.append(np.mean(policy_loss.numpy()))
+        self.entropy_logger.append(-np.mean(np.asarray(entropies)))
+        #self.ppo_policy_loss_logger.append(-np.mean(np.asarray(policy_losses)))
+        self.ppo_policy_loss_logger.append(np.mean(np.abs(np.asarray(policy_losses))))
+
+
+    @tf.function
+    def _optimize_actor_ppo_step(self, states, actions, sampling_action_log_probs, advantages):
+        with tf.GradientTape() as tape:
+            new_action_log_probs, entropy = self.actor.action_log_prob_and_entropy(states, actions)
+            #print('new action log probs', new_action_log_probs.numpy().shape)
+            #print('entropy shapoe', entropy.numpy().shape)
+            ppo_loss, entropy_loss = self._ppo_and_entropy_loss(advantages, sampling_action_log_probs, new_action_log_probs, entropy)
+            sum_ppo_policy_loss = tf.reduce_mean(ppo_loss) + tf.reduce_mean(entropy_loss)
+            #print('ppo_loss_shape', ppo_loss.numpy().shape)
+            gradients = tape.gradient(sum_ppo_policy_loss, self.actor.model.trainable_variables)
+            self.actor.model.optimizer.apply_gradients(zip(gradients, self.actor.model.trainable_variables))
+            return ppo_loss, entropy_loss
 
     def _ppo_and_entropy_loss(self, advantages, sampling_action_log_probs, new_action_log_probs, entropy):
-        ppo_objective = self._ppo_objective(advantages, sampling_action_log_probs, new_action_log_probs)
-        entropy_objective = self.entropy_coefficient*entropy
-        #print('entropy', entropy_objective)
-        ppo_and_entropy_loss = - (ppo_objective + entropy_objective)
-        return ppo_and_entropy_loss
+        #print('advantages shape', advantages.numpy().shape)
+        #print('sampling_action_log_probs shape', sampling_action_log_probs.numpy().shape)
+        ppo_objective = - self._ppo_objective(advantages, sampling_action_log_probs, new_action_log_probs)
+        #print('ppo objective shape', ppo_objective.numpy().shape)
+        entropy_objective = - self.entropy_coefficient*entropy
+        #print('entropy_objective_shape', entropy_objective.numpy().shape)
+        return ppo_objective, entropy_objective
 
     def _ppo_objective(self, advantages, sampling_action_log_probs, new_action_log_probs):
         log_probability_ratio = new_action_log_probs - sampling_action_log_probs
+        #print('log_prob_ratio_shape', log_probability_ratio.numpy().shape)
         probability_ratio = tf.math.exp(log_probability_ratio)
-        #print('advantages', advantages)
+        #print('probration_shape', probability_ratio.numpy().shape)
         clipped_probability_ratio = tf.clip_by_value(probability_ratio, 1-self.epsilon, 1+self.epsilon)
+        #print('clipped_probability_ratio_shape', clipped_probability_ratio.numpy().shape)
         ppo_objective = tf.math.minimum(advantages*probability_ratio, advantages*clipped_probability_ratio)
-        #print('ppoobjective', ppo_objective)
+        #print('_ppo_objective_shape', ppo_objective.numpy().shape)
         return ppo_objective
 
-
-    def _prepare_datasets(self, keys):
-        rand_seed = np.random.randint(20000)
-        datasets = []
-        for key in keys:
-            key_data = self.datasets[key]
-            key_data = key_data.shuffle(self.buffer_size, seed=rand_seed)
-            key_data = key_data.batch(self.batch_size)
-            datasets.append(key_data)
-        return datasets
-
     def create_datasets(self, data):
-        datasets = {}
-        for key in data.keys():
-            if key == 'advantages':
-                advs = data[key]
-                advs = np.asarray(advs)
-                advs = advs - np.mean(advs)
-                advs = advs / np.std(advs)
-                advs = np.squeeze(advs)
-                data[key]=np.split(advs, advs.shape[0])
-            datasets[key] = tf.data.Dataset.from_tensor_slices(data[key])
-        return datasets
+        data['advantages'] = data['advantages'] - np.mean(data['advantages'])
+        data['advantages'] = data['advantages'] / np.std(data['advantages'])
+        dataset = tf.data.Dataset.from_tensor_slices(tuple([data[key] for key in self.data_keys]))
+        dataset = dataset.shuffle(self.shuffle_buffer_size)
+        dataset = dataset.batch(self.batch_size)
+        dataset = dataset.prefetch(self.prefetch_buffer_size)
+        return dataset

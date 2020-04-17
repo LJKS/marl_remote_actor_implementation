@@ -54,11 +54,13 @@ class LunarLanderC_POC():
     def __init__(self, opponent_actor):
         #doesnt need opponent_actor
         self.env = gym.make('LunarLanderContinuous-v2')
+        self.env._max_episode_steps = 350
         self.reward_sum = 0
 
     def step(self, action):
         action = np.squeeze(action)
         o, r, d, _ = self.env.step(action)
+        r = r
         o = np.expand_dims(o, 0)
         o.astype(np.float32)
         self.reward_sum = self.reward_sum + r
@@ -82,6 +84,33 @@ class LunarLander_POC():
     def __init__(self, opponent_actor):
         #doesnt need opponent_actor
         self.env = gym.make('LunarLander-v2')
+        self.reward_sum = 0
+
+    def step(self, action):
+        action = np.squeeze(action)
+        o, r, d, _ = self.env.step(action)
+        o = np.expand_dims(o, 0)
+        o.astype(np.float32)
+        self.reward_sum = self.reward_sum + r
+        return o,r,d,None
+
+    def agent_won(self):
+        return self.reward_sum
+
+    def reset(self):
+        o = self.env.reset()
+        o = np.expand_dims(o, 0)
+        o.astype(np.float32)
+        return o
+
+
+    def get_observation_shape(self):
+        return (1,) + self.env.observation_space.shape
+
+class WalkerC_POC():
+    def __init__(self, opponent_actor):
+        #doesnt need opponent_actor
+        self.env = gym.make('BipedalWalker-v3')
         self.reward_sum = 0
 
     def step(self, action):

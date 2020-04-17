@@ -1,7 +1,7 @@
-import models
+import model_factory
 import ray
 import numpy as np
-
+from scipy import signal
 @ray.remote(num_cpus=1)
 class Remote_Runner:
     """
@@ -21,15 +21,15 @@ class Remote_Runner:
         self.opponent_id = opponent_id
         self.gym_class = gym_class
         actor_description = network_descriptions['actor']
-        self.actor = models.Actor(actor_description[0](actor_description[1], actor_description[2], actor_description[3], actor_description[4], actor_description[5]))
+        self.actor = model_factory.get_model('Actor')(model_factory.get_model(actor_description[0])(actor_description[1], actor_description[2], actor_description[3], actor_description[4], actor_description[5]))
         self.actor.set_weights(actor_weights)
         critic_description = network_descriptions['critic']
-        self.critic = critic_description[0](critic_description[1], critic_description[2], critic_description[3])
+        self.critic = model_factory.get_model(critic_description[0])(critic_description[1], critic_description[2], critic_description[3])
         self.critic.set_weights(critic_weights)
         opponent_description = network_descriptions['opponent']
-        self.opponent = models.Actor(opponent_description[0](opponent_description[1], opponent_description[2], opponent_description[3], opponent_description[4], opponent_description[5]))
+        self.opponent = model_factory.get_model('Actor')(model_factory.get_model(opponent_description[0])(opponent_description[1], opponent_description[2], opponent_description[3], opponent_description[4], opponent_description[5]))
         self.opponent.set_weights(opponent_weights)
-
+        self.step_penalty = -0.0
         self.gym = gym_class(self.opponent)
 
         self.gam = gam
@@ -37,10 +37,10 @@ class Remote_Runner:
 
     @ray.method(num_return_vals=1)
     def generate_sample(self):
-        states, actions, action_log_probs, value_targets, advantages = self.run()
+        states, actions, action_log_probs, value_targets, advantages, rewards = self.run()
         agent_won = self.gym.agent_won()
         #Just return one object_id containing all elements - makes using ray.wait() more intuitive
-        return [states, actions, action_log_probs, value_targets, advantages, agent_won, self.runner_id, self.opponent_id]
+        return (states, actions, action_log_probs, value_targets, advantages, rewards, agent_won, self.runner_id, self.opponent_id)
 
     def run(self):
         states = []
@@ -54,42 +54,48 @@ class Remote_Runner:
         while not done:
             action, log_prob = self.actor.act(state)
             state, reward, done, _ = self.gym.step(action)
+            reward = reward # self.step_penalty
             value_estimate = self.critic(state)
             if not done:
                 states.append(state)
             rewards.append(reward)
             actions.append(action)
             action_log_probs.append(log_prob)
-            value_estimates.append(np.reshape(value_estimate.numpy(),(1)))
-        value_targets = self.compute_values(rewards)
-        advantages = self.compute_gaes(rewards, value_estimates)
-        return states, actions, action_log_probs, value_targets, advantages
+            value_estimates.append(np.reshape(value_estimate.numpy(),()))
+        rewards = np.asarray(rewards)
+        value_estimates = np.asarray(value_estimates)
+        value_targets = np.reshape(self.compute_value_targets(rewards),(-1,1))
+        advantages = np.reshape(self.compute_gaes(rewards, value_estimate), (-1,1))
+        states = np.concatenate(states)
+        actions = np.concatenate(actions)
+        action_log_probs = np.reshape(np.concatenate(action_log_probs), (-1,1))
+        return states, actions, action_log_probs, value_targets, advantages, rewards
 
-    def compute_values(self, rewards):
-        rewards.reverse()
-        accumulated_value = 0
-        values = []
-        for r in rewards:
-            accumulated_value = (self.gam*accumulated_value) + r
-            values.append(accumulated_value)
-        rewards.reverse()
-        values.reverse()
-        return values
+    def compute_value_targets(self, rewards):
+        value_targets = self.discount_cumsum(rewards, self.gam)
+        return value_targets
 
     def compute_gaes(self, rewards, values):
-        gam_lam = self.gam*self.lam
-        #compute temporal difference errors
-        values.append(0)
-        td_deltas = [rewards[i] + self.gam*values[i+1] - values[i] for i in range(len(rewards))]
-        values.pop()
+        values_app_zero = np.append(values, 0)
+        td_errors = rewards + self.gam*values_app_zero[1:] - values_app_zero[:-1]
+        gam_lam = self.gam * self.lam
+        gae_advantages = self.discount_cumsum(td_errors, gam_lam)
+        return gae_advantages.astype(np.float32)
 
-        gae_advantages = []
-        accumulated_advantage = 0
-        td_deltas.reverse()
-        for td_delta in td_deltas:
-            accumulated_advantage = (accumulated_advantage*gam_lam) + td_delta
-            gae_advantages.append(accumulated_advantage)
-        gae_advantages.reverse()
-        return gae_advantages
+    def discount_cumsum(self, x, discount):
+        """
+        magic from rllab for computing discounted cumulative sums of vectors.
+        input:
+            vector x,
+            [x0,
+             x1,
+             x2]
+        output:
+            [x0 + discount * x1 + discount^2 * x2,
+             x1 + discount * x2,
+             x2]
+        """
+        return signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
+
 
     #From here on it is my models package
