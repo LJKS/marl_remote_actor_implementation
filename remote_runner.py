@@ -2,6 +2,7 @@ import model_factory
 import ray
 import numpy as np
 from scipy import signal
+
 @ray.remote(num_cpus=1)
 class Remote_Runner:
     """
@@ -29,9 +30,7 @@ class Remote_Runner:
         opponent_description = network_descriptions['opponent']
         self.opponent = model_factory.get_model('Actor')(model_factory.get_model(opponent_description[0])(opponent_description[1], opponent_description[2], opponent_description[3], opponent_description[4], opponent_description[5]))
         self.opponent.set_weights(opponent_weights)
-        self.step_penalty = -0.0
         self.gym = gym_class(self.opponent)
-
         self.gam = gam
         self.lam = lam
 
@@ -54,7 +53,6 @@ class Remote_Runner:
         while not done:
             action, log_prob = self.actor.act(state)
             state, reward, done, _ = self.gym.step(action)
-            reward = reward # self.step_penalty
             value_estimate = self.critic(state)
             if not done:
                 states.append(state)

@@ -8,18 +8,21 @@ logging.getLogger("tensorflow").setLevel(logging.ERROR)
 class PPO_optimizer:
     '''
     @params:
+     - network_descriptions: descripions of the actor and critic model
+     - actor weights: weights for the actor ANN
+     - critic weights: weights for the critic ANN 
      - data: dict with keys: 'value_targets', 'states', 'actions', 'sampling_action_log_probs', 'advantages'
     '''
 
     def __init__(self, network_descriptions, actor_weights, critic_weights, data):
         self.data_keys = ['value_targets', 'states', 'actions', 'sampling_action_log_probs', 'advantages']
         self.epsilon = 0.2
-        self.shuffle_buffer_size = 1000
-        self.prefetch_buffer_size = 128
+        self.shuffle_buffer_size = 2000
+        self.prefetch_buffer_size = 2000
         self.batch_size = 64
         self.critic_optimization_epochs = 10
         self.actor_optimization_epochs = 10
-        self.entropy_coefficient = 0.01
+        self.entropy_coefficient = 0.0
         actor_description = network_descriptions['actor']
         self.actor = model_factory.get_model('Actor')(model_factory.get_model(actor_description[0])(actor_description[1], actor_description[2], actor_description[3], actor_description[4], actor_description[5]))
         self.actor.set_weights(actor_weights)

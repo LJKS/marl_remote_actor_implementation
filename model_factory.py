@@ -1,5 +1,8 @@
 # Using a factory design pattern is necessary to restrict tensorflow imports to their respective subprocess call
 def get_model(model_name):
+    """
+    bindings for classes of models.py as a factory design pattern 
+    """
     import models
     if model_name == 'Actor':
         return models.Actor

@@ -4,16 +4,32 @@ import remote_runner
 import numpy as np
 import statistics
 import optimization_bindings
+import model_factory
+
+#remove remote prints to main, initialize ray cluster
+
+#switching prints to main process
 ray.init(log_to_driver=False)
 #ray.init()
+
 class Training_organizer:
+    """
+    Training_organizer class connects trajectory sampling and optimization, implementing multiprocessing using the ray multiprocessing framework
+    @params:
+        - steps is the number of sampling & optimization iterations taken
+        - gym is the Class of the gym to be used
+        - network descriptions is a dict containing list descriptions behind keys 'actor', 'critic' and 'opponent'
+        - curriculum_designer is the curriculum_designer to be used
+    external use of this class is supposed to be limited to train.
+    """
     def __init__(self, steps, gym, network_descriptions, curriculum_designer):
+        # min num remotes should be orders of magnitude smaller than min_num_runs_generated
         self.num_remotes = 32
         self.min_num_runs_generated  = 50
-        self.gam = 0.99
+        self.gam = 0.999
         self.lam = 0.97
         self.finish_runs_time = 1.
-
+        #number of iterations of first gathering samples, then optimizing on them
         self.steps = steps
         self.gym = gym
         self.network_descriptions = network_descriptions
@@ -23,17 +39,22 @@ class Training_organizer:
         a_w, c_w = ray.get(get_initial_weights.remote(self.network_descriptions))
         self.actor_weights.append(a_w)
         self.critic_weights = c_w
-        self.curriculum_designer = curriculum_designer
-        #debug
+        #build logging object for this!
         self.logger = [dict()]
 
 
     def train(self):
+        """
+        void method, implements training loops
+        """
         for i in range(self.steps):
             print('Training Episode ', i)
             self.training_iteration()
 
     def training_iteration(self):
+        """
+        implements a single training run
+        """
         data = self.create_training_data()
         new_actor_weights, new_critic_weights, report = ray.get(optimization_bindings.optimize_ppo.remote(self.network_descriptions, self.actor_weights[-1], self.critic_weights, data))
         self.logger[-1]['critic_loss']=report['critic_summary']
@@ -46,6 +67,10 @@ class Training_organizer:
 
 
     def create_training_data(self):
+        """
+        runs @num_remotes parallel processes each returning a finished trajectory, accumulating their information and starting a new one once finished
+        some processes not finishing in time after the @min_num_runs_generated is reached might not be finished and are cancelled
+        """
         states_aggregator = []
         actions_aggregator = []
         action_log_probs_aggregator = []
@@ -55,16 +80,19 @@ class Training_organizer:
 
         sampling_results = [[] for _ in self.actor_weights]
         remote_runner_list = []
+
         for i in range(self.num_remotes):
             sampled_opponent = self.curriculum_designer.sample_opponent()
             remote_runner_list.append(remote_runner.Remote_Runner.remote(i, sampled_opponent, self.gym, self.network_descriptions, self.actor_weights[-1], self.critic_weights, self.actor_weights[sampled_opponent], self.gam, self.lam))
         object_ids = [remote_runner.generate_sample.remote() for remote_runner in remote_runner_list]
         episodes_generated = 0
+
+        #TODO: move inner part of while into function to put into finally statement
         while episodes_generated < self.min_num_runs_generated:
-            #print('debug: episodes_generated', episodes_generated)
             list_done, list_not_done = ray.wait(object_ids)
             episodes_generated += len(list_done)
             finished_runs = ray.get(list_done)
+
             for run_data in finished_runs:
                 #runner_id is the index in the remote_runner_list list, opponent_id is the index of the opponent network in in the actor_weights list
                 states, actions, action_log_probs, value_targets, advantages, rewards, agent_won, runner_id, opponent_id = run_data
@@ -72,9 +100,7 @@ class Training_organizer:
                     list.append(elem)
                 sampled_opponent = self.curriculum_designer.sample_opponent()
                 network_sampled_opponent = self.actor_weights[sampled_opponent]
-
                 remote_runner_list[runner_id] = remote_runner.Remote_Runner.remote(runner_id, sampled_opponent, self.gym, self.network_descriptions, self.actor_weights[-1], self.critic_weights, self.actor_weights[sampled_opponent], self.gam, self.lam)
-
                 list_not_done.append(remote_runner_list[runner_id].generate_sample.remote())
                 sampling_results[opponent_id].append(agent_won)
 
@@ -84,12 +110,12 @@ class Training_organizer:
         list_done, list_not_done = ray.wait(object_ids, len(list_not_done), self.finish_runs_time)
         episodes_generated += len(list_done)
         finished_runs = ray.get(list_done)
+
         for run_data in finished_runs:
             #runner_id is the index in the remote_runner_list list, opponent_id is the index of the opponent network in in the actor_weights list
             states, actions, action_log_probs, value_targets, advantages, rewards, agent_won, runner_id, opponent_id = run_data
             for elem, list in zip([states, actions, action_log_probs, value_targets, advantages, rewards], [states_aggregator, actions_aggregator, action_log_probs_aggregator, value_targets_aggregator, advantages_aggregator, rewards_aggregator]):
                 list.append(elem)
-
             sampling_results[opponent_id].append(agent_won)
 
         states_aggregator = np.concatenate(states_aggregator)
@@ -104,12 +130,13 @@ class Training_organizer:
         self.logger[-1]['average num steps']=rewards_aggregator.shape[0]/episodes_generated
         #Data is generated, update curriculum_designer and return data
         self.curriculum_designer.update(sampling_results)
-        #print(action_log_probs_aggregator)
         data = {'value_targets' : value_targets_aggregator, 'states' : states_aggregator, 'actions' : actions_aggregator, 'sampling_action_log_probs' : action_log_probs_aggregator, 'advantages' : advantages_aggregator}
-
         return data
 
     def print_logger(self):
+        """
+        prints gathered information on iteration
+        """
         for dic in self.logger:
             out=''
             for key in dic:
@@ -122,6 +149,9 @@ class Training_organizer:
 
 @ray.remote(num_cpus=1, num_return_vals=2)
 def get_initial_weights(network_descriptions):
+    """
+    initializes a single network of each kind to gatheer initial weights
+    """
     import model_factory
     actor_model = model_factory.get_model(network_descriptions['actor'][0])
     critic_model = model_factory.get_model(network_descriptions['critic'][0])

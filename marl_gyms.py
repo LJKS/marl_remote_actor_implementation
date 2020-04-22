@@ -54,7 +54,7 @@ class LunarLanderC_POC():
     def __init__(self, opponent_actor):
         #doesnt need opponent_actor
         self.env = gym.make('LunarLanderContinuous-v2')
-        self.env._max_episode_steps = 350
+        self.env._max_episode_steps = 800
         self.reward_sum = 0
 
     def step(self, action):
