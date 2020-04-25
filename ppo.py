@@ -10,7 +10,7 @@ class PPO_optimizer:
     @params:
      - network_descriptions: descripions of the actor and critic model
      - actor weights: weights for the actor ANN
-     - critic weights: weights for the critic ANN 
+     - critic weights: weights for the critic ANN
      - data: dict with keys: 'value_targets', 'states', 'actions', 'sampling_action_log_probs', 'advantages'
     '''
 
@@ -22,7 +22,7 @@ class PPO_optimizer:
         self.batch_size = 64
         self.critic_optimization_epochs = 10
         self.actor_optimization_epochs = 10
-        self.entropy_coefficient = 0.0
+        self.entropy_coefficient = 0.001
         actor_description = network_descriptions['actor']
         self.actor = model_factory.get_model('Actor')(model_factory.get_model(actor_description[0])(actor_description[1], actor_description[2], actor_description[3], actor_description[4], actor_description[5]))
         self.actor.set_weights(actor_weights)

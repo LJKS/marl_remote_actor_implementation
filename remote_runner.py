@@ -52,6 +52,7 @@ class Remote_Runner:
         states.append(state)
         while not done:
             action, log_prob = self.actor.act(state)
+            action = action.numpy()
             state, reward, done, _ = self.gym.step(action)
             value_estimate = self.critic(state)
             if not done:
@@ -94,6 +95,3 @@ class Remote_Runner:
              x2]
         """
         return signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
-
-
-    #From here on it is my models package
