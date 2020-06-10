@@ -20,9 +20,9 @@ class PPO_optimizer:
         self.shuffle_buffer_size = 2000
         self.prefetch_buffer_size = 2000
         self.batch_size = 64
-        self.critic_optimization_epochs = 10
-        self.actor_optimization_epochs = 10
-        self.entropy_coefficient = 0.001
+        self.critic_optimization_epochs = 20
+        self.actor_optimization_epochs = 20
+        self.entropy_coefficient = 0.0
         actor_description = network_descriptions['actor']
         self.actor = model_factory.get_model('Actor')(model_factory.get_model(actor_description[0])(actor_description[1], actor_description[2], actor_description[3], actor_description[4], actor_description[5]))
         self.actor.set_weights(actor_weights)

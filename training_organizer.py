@@ -25,7 +25,7 @@ class Training_organizer:
     def __init__(self, steps, gym, network_descriptions, curriculum_designer):
         # min num remotes should be orders of magnitude smaller than min_num_runs_generated
         self.num_remotes = 32
-        self.min_num_runs_generated  = 200
+        self.min_num_runs_generated  = 400
         self.gam = 0.999
         self.lam = 0.97
         self.finish_runs_time = 1.
