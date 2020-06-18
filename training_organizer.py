@@ -5,12 +5,13 @@ import numpy as np
 import statistics
 import optimization_bindings
 import model_factory
-
+import pickle
+import csv
+from hyperparameters import Hyperparameters
 #remove remote prints to main, initialize ray cluster
 
 #switching prints to main process
-ray.init(log_to_driver=False)
-#ray.init()
+
 
 class Training_organizer:
     """
@@ -22,14 +23,17 @@ class Training_organizer:
         - curriculum_designer is the curriculum_designer to be used
     external use of this class is supposed to be limited to train.
     """
-    def __init__(self, steps, gym, network_descriptions, curriculum_designer):
+    def __init__(self, steps, gym, network_descriptions, curriculum_designer, hyperparameters=Hyperparameters()):
+        ray.init(log_to_driver=hyperparameters.log_to_driver)
         # min num remotes should be orders of magnitude smaller than min_num_runs_generated
         self.num_remotes = 32
         self.min_num_runs_generated  = 400
         self.gam = 0.999
         self.lam = 0.97
         self.finish_runs_time = 1.
-        #number of iterations of first gathering samples, then optimizing on them
+        self.hyperparameters = hyperparameters
+
+        #number of iterations of first gathering samples, then optimizing on them to run here
         self.steps = steps
         self.gym = gym
         self.network_descriptions = network_descriptions
@@ -39,24 +43,33 @@ class Training_organizer:
         a_w, c_w = ray.get(get_initial_weights.remote(self.network_descriptions))
         self.actor_weights.append(a_w)
         self.critic_weights = c_w
+        #track with training iteration this is in
+        self.iteration = 0
         #build logging object for this!
         self.logger = [dict()]
+
 
 
     def train(self):
         """
         void method, implements training loops
         """
+        if not ray.is_initialized():
+            ray.init(log_to_driver = self.hyperparameters.log_to_driver)
         for i in range(self.steps):
-            print('Training Episode ', i)
+            print('Training Episode ', self.iteration)
             self.training_iteration()
+            self.save()
+            self.iteration +=1
+            self.hyperparameters.step += 1
+        ray.shutdown()
 
     def training_iteration(self):
         """
         implements a single training run
         """
         data = self.create_training_data()
-        new_actor_weights, new_critic_weights, report = ray.get(optimization_bindings.optimize_ppo.remote(self.network_descriptions, self.actor_weights[-1], self.critic_weights, data))
+        new_actor_weights, new_critic_weights, report = optimization_bindings.optimize_ppo(self.network_descriptions, self.actor_weights[-1], self.critic_weights, data, self.hyperparameters)
         self.logger[-1]['critic_loss']=report['critic_summary']
         self.logger[-1]['entropy']=report['entropy_summary']
         self.logger[-1]['ppo_objective']=report['policy_summary']
@@ -146,6 +159,17 @@ class Training_organizer:
                 else:
                     out = out + "-%11.4f |"%(dic[key])
             print(out)
+
+    def save(self):
+        #save everything from this model
+        #step_str is deprecated for now
+        #step_str = '_step_' + str(self.iteration)
+        with open(self.hyperparameters.training_save_path + '.pkl', 'wb') as f:
+            pickle.dump(self, f)
+        with open(self.hyperparameters.result_save_path + '.csv', 'a') as f:
+            csv_writer = csv.writer(f)
+            results = self.curriculum_designer.report()
+            csv_writer.writerow(self.curriculum_designer.report())
 
 @ray.remote(num_cpus=1, num_return_vals=2)
 def get_initial_weights(network_descriptions):

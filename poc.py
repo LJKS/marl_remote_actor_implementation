@@ -4,8 +4,9 @@ import curriculum_designers
 import vier_gewinnt
 import snake_gym
 import tron_gym
+import hyperparameters
 
-mode = 'Tron_gym'
+mode = 'Multi_Tron'
 if mode == 'discrete':
     gym = marl_gyms.LunarLander_POC
     input_shape = gym(None).get_observation_shape()
@@ -71,5 +72,17 @@ elif mode=='Tron_gym':
     critic_description = ['V_Dense_CNN_Model', cnn_dict, 0.001, input_shape]
     opponent_description = actor_description
     network_descriptions = {'actor': actor_description, 'critic': critic_description, 'opponent':opponent_description}
-    training = training_organizer.Training_organizer(200, gym, network_descriptions, curriculum_designers.Self_play())
+    training = training_organizer.Training_organizer(200, gym, network_descriptions, curriculum_designers.Uniform_Sampling())
     training.train()
+elif mode == 'Multi_Tron':
+    for _ in range(10):
+        gym = tron_gym.Tron_gym
+        action_size = gym(None).get_action_size()
+        input_shape = gym(None).get_observation_shape()
+        cnn_dict = {'layers':5, 'filters':4, 'mlp':[1024,128]}
+        actor_description = ['Dense_CNN_Model', cnn_dict, 'discrete', action_size, 0.0003, input_shape]
+        critic_description = ['V_Dense_CNN_Model', cnn_dict, 0.001, input_shape]
+        opponent_description = actor_description
+        network_descriptions = {'actor': actor_description, 'critic': critic_description, 'opponent':opponent_description}
+        training = training_organizer.Training_organizer(200, gym, network_descriptions, curriculum_designers.Uniform_Sampling(), hyperparameters=hyperparameters.Hyperparameters())
+        training.train()

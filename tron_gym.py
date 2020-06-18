@@ -71,7 +71,7 @@ class Tron_gym:
     def opponent_acts(self, action):
         #returns True iff opponent does not lose, else returns False
         target_pos = self.move_target_pos(self.opponent_pos, action)
-        valid_move = self.is_valid_pos(target_pos)
+        valid_move = self.is_valid_move(target_pos)
         #move was invalid
         if not valid_move:
             return False
@@ -84,7 +84,7 @@ class Tron_gym:
     def player_acts(self, action):
         #returns True iff player does not lose, else returns False
         target_pos = self.move_target_pos(self.player_pos, action)
-        valid_move = self.is_valid_pos(target_pos)
+        valid_move = self.is_valid_move(target_pos)
         #move was invalid
         if not valid_move:
             return False

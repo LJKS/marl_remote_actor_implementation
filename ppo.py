@@ -14,7 +14,7 @@ class PPO_optimizer:
      - data: dict with keys: 'value_targets', 'states', 'actions', 'sampling_action_log_probs', 'advantages'
     '''
 
-    def __init__(self, network_descriptions, actor_weights, critic_weights, data):
+    def __init__(self, network_descriptions, actor_weights, critic_weights, data, hyperparameters):
         self.data_keys = ['value_targets', 'states', 'actions', 'sampling_action_log_probs', 'advantages']
         self.epsilon = 0.2
         self.shuffle_buffer_size = 2000
@@ -22,7 +22,7 @@ class PPO_optimizer:
         self.batch_size = 64
         self.critic_optimization_epochs = 20
         self.actor_optimization_epochs = 20
-        self.entropy_coefficient = 0.0
+        self.entropy_coefficient = 0.01
         actor_description = network_descriptions['actor']
         self.actor = model_factory.get_model('Actor')(model_factory.get_model(actor_description[0])(actor_description[1], actor_description[2], actor_description[3], actor_description[4], actor_description[5]))
         self.actor.set_weights(actor_weights)

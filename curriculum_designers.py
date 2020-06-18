@@ -34,9 +34,7 @@ class Uniform_Sampling:
         self.step = self.step + 1
 
     def report(self):
-        last_step = self.results[-1]
-        mean_results = [statistics.mean(idx_results) if len(idx_results)>0 else None for idx_results in last_step]
-        return mean_results
+        return self.results[-1]
 
 class OriginalSelf:
     def __init__(self):

@@ -1,1 +1,9 @@
-**/gym
+# exclude everything
+saves/saved_models/*
+saves/saved_results/*
+saves/saved_training_states/*
+__pycache__
+# exception to the rule
+!saves/saved_models/.gitkeep
+!saves/saved_results/.gitkeep
+!saves/saved_training_states/.gitkeep
