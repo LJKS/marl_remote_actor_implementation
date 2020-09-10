@@ -5,8 +5,9 @@ import vier_gewinnt
 import snake_gym
 import tron_gym
 import hyperparameters
+import antsumo
 
-mode = 'Multi_Tron'
+mode = 'Ant_Sumo'
 if mode == 'discrete':
     gym = marl_gyms.LunarLander_POC
     input_shape = gym(None).get_observation_shape()
@@ -85,4 +86,16 @@ elif mode == 'Multi_Tron':
         opponent_description = actor_description
         network_descriptions = {'actor': actor_description, 'critic': critic_description, 'opponent':opponent_description}
         training = training_organizer.Training_organizer(200, gym, network_descriptions, curriculum_designers.Uniform_Sampling(), hyperparameters=hyperparameters.Hyperparameters())
+        training.train()
+
+elif mode == 'Ant_Sumo':
+    for _ in range(10):
+        gym = antsumo.Ant_Sumo_Gym
+        action_size = gym(None).get_action_size()
+        input_shape = gym(None).get_observation_shape()
+        actor_description = ['MLP_model', [256,256,128], 'continuous', action_size, 0.0003, input_shape]
+        critic_description = ['V_MLP_model', [256,256,128], 0.001, input_shape]
+        opponent_description = actor_description
+        network_descriptions = {'actor': actor_description, 'critic': critic_description, 'opponent':opponent_description}
+        training = training_organizer.Training_organizer(200, gym, network_descriptions, curriculum_designers.Self_play(), hyperparameters=hyperparameters.Hyperparameters(num_cpus=16, log_to_driver=False))
         training.train()

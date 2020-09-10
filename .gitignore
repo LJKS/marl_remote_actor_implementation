@@ -2,6 +2,7 @@
 saves/saved_models/*
 saves/saved_results/*
 saves/saved_training_states/*
+robotics_files
 __pycache__/*
 # exception to the rule
 !saves/saved_models/.gitkeep

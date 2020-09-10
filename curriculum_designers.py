@@ -10,6 +10,7 @@ class Self_play:
         return self.step
 
     def update(self, updates):
+        print(updates)
         mean_results = [statistics.mean(idx_results) if len(idx_results)>0 else None for idx_results in updates]
         self.results.append(mean_results)
         print(mean_results)
@@ -17,7 +18,7 @@ class Self_play:
 
     def report(self):
         last_step = self.results[-1]
-        return last_step, statistics.mean(last_step)
+        return last_step
 
 class Uniform_Sampling:
     def __init__(self):

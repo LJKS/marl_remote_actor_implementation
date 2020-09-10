@@ -27,7 +27,7 @@ class Training_organizer:
         ray.init(log_to_driver=hyperparameters.log_to_driver)
         # min num remotes should be orders of magnitude smaller than min_num_runs_generated
         self.num_remotes = 32
-        self.min_num_runs_generated  = 400
+        self.min_num_runs_generated  = 100
         self.gam = 0.999
         self.lam = 0.97
         self.finish_runs_time = 1.
