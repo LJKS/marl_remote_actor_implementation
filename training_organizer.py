@@ -146,6 +146,88 @@ class Training_organizer:
         data = {'value_targets' : value_targets_aggregator, 'states' : states_aggregator, 'actions' : actions_aggregator, 'sampling_action_log_probs' : action_log_probs_aggregator, 'advantages' : advantages_aggregator}
         return data
 
+    def test_against(self, paths, num_tests=20, mode='all', num_cpus=None):
+        """
+        tests own agent against a list of other training processes
+        @params:
+            - paths is a list of paths to load pickled training_organizers from
+            - num_tests is the number of tests to run on each combination of load in paths and own models supposed to be tested
+            - mode: string 'all' to test all iteration results is default, otherwise list of indices of own iterations to be tested
+        @returns:
+            - dict of same length as paths, key being the respective path string from path and value being a list of length of  weights, each containing a list of length of weights further specified by the argument mode. Each list (of length num_tests) entry contains a list with the respective single test results
+        """
+
+        def test_idx_generator(own, other, num_tests):
+            """
+            generates indices over list of own and other indices
+            """
+            for own_idx in range(len(own)):
+                for other_idx in range(len(other)):
+                    print('testing own iteration %d against other iteration %d.'%(own_idx, other_idx))
+
+                    for _ in range(num_tests):
+                        print('debug')
+                        yield own_idx, other_idx
+
+        def store_run(partial_results, run):
+            # run is states, actions, action_log_probs, value_targets, advantages, rewards, agent_won, runner_id, opponent_id
+            #unpack
+            _, _, _, _, _, rewards, _, result_own_idx, result_test_idx = run
+            partial_results[result_own_idx][result_test_idx].append(np.mean(rewards))
+            #mean reward is now stored in mutable partial_results list
+
+        #needs running ray instance, might not exist if loaded from pickle
+        if not ray.is_initialized():
+            ray.init(log_to_driver = self.hyperparameters.log_to_driver)
+        #organize input parameters
+        num_cpus = self.num_remotes if num_cpus==None else num_cpus
+        own_weights = self.actor_weights if mode=='all' else [self.actor_weights[i] for i in mode]
+
+
+        # to store everything
+        test_results = {}
+        for test_opponent_path in paths:
+            test_weights = pickle.load(open(test_opponent_path, 'rb')).actor_weights
+            idx_generator = test_idx_generator(own_weights, test_weights, num_tests)
+
+            job_list = []
+            #stores the results for this specific path
+            partial_results = [[[] for _ in test_weights] for _ in self.actor_weights]
+            for own_idx, test_idx in idx_generator:
+                if len(job_list) < num_cpus:
+                    #TODO: Could be replaced by a more streamlined actor which is built for evaluation not training
+                    new_actor = remote_runner.Remote_Runner.remote(own_idx, test_idx, self.gym, self.network_descriptions, self.actor_weights[own_idx], self.critic_weights, test_weights[test_idx], self.gam, self.lam)
+                    job_list.append(new_actor.generate_sample.remote())
+
+                elif len(job_list)==num_cpus:
+                    #Compute jobs to make space for the new job
+                    #find finished tests --> result_runs
+                    jobs_done, job_list = ray.wait(job_list)
+                    result_runs = ray.get(jobs_done)
+                    for run in result_runs:
+                        store_run(partial_results, run)
+                    #Finally add the new job
+                    new_actor = remote_runner.Remote_Runner.remote(own_idx, test_idx, self.gym, self.network_descriptions, self.actor_weights[own_idx], self.critic_weights, test_weights[test_idx], self.gam, self.lam)
+                    job_list.append(new_actor.generate_sample.remote())
+                else:
+                    #something went very wrong, abort please!
+                    raise RuntimeError('too many jobs')
+
+            #work of the left over set of jobs now
+            result_runs = ray.get(job_list)
+            for run in result_runs:
+                store_run(partial_results, run)
+            test_results[test_opponent_path] = partial_results
+
+        #ray no more needed
+        ray.shutdown()
+        return test_results
+
+
+
+
+
+
     def print_logger(self):
         """
         prints gathered information on iteration

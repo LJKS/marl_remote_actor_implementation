@@ -97,5 +97,5 @@ elif mode == 'Ant_Sumo':
         critic_description = ['V_MLP_model', [256,256,128], 0.001, input_shape]
         opponent_description = actor_description
         network_descriptions = {'actor': actor_description, 'critic': critic_description, 'opponent':opponent_description}
-        training = training_organizer.Training_organizer(200, gym, network_descriptions, curriculum_designers.Self_play(), hyperparameters=hyperparameters.Hyperparameters(num_cpus=16, log_to_driver=False))
+        training = training_organizer.Training_organizer(200, gym, network_descriptions, curriculum_designers.Self_play(), hyperparameters=hyperparameters.Hyperparameters(num_cpus=8, log_to_driver=False))
         training.train()

@@ -2,7 +2,7 @@ import training_organizer
 import marl_gyms
 import curriculum_designers
 import models
-import Snake_gym
+#import Snake_gym
 
 gym = marl_gyms.Bet_gym
 input_shape = gym(None).get_observation_shape()
